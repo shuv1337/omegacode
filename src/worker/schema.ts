@@ -194,8 +194,8 @@ function allowsNull(schema: JSONSchema | undefined): boolean {
  * Order matters. We try a direct parse FIRST so that a ``` fence appearing *inside* a JSON
  * string value (e.g. a markdown `plan` field that embeds a ```bash code block) is never
  * mis-extracted — the previous implementation grabbed the first ```…``` span it saw and corrupted
- * otherwise-valid JSON. Only if a direct parse fails do we fall back to stripping an outer code
- * fence (greedy, so an inner ``` is preserved) and finally to slicing the outermost {…}/[…] span.
+ * otherwise-valid JSON. Only if a direct parse fails do we fall back to stripping a whole-output
+ * outer code fence, then fenced blocks in order, and finally complete {…}/[…] spans in order.
  */
 export function parseJsonLoose(text: string): unknown {
   const trimmed = text.trim()
@@ -208,25 +208,75 @@ export function parseJsonLoose(text: string): unknown {
     // fall through
   }
 
-  // 2) The model wrapped the JSON in a code fence. Strip the OUTERMOST fence (greedy to the last
-  //    ```), which keeps any ``` embedded in the JSON intact.
-  const fenced = /```(?:json)?\s*([\s\S]*)```/.exec(trimmed)
-  if (fenced) {
+  // 2) The model wrapped the entire JSON in a code fence. Greedy to the last ``` so inner fences
+  //    embedded in string values are preserved, but only useful if the stripped content parses.
+  const outerFence = /^\s*```(?:json)?\s*([\s\S]*)```\s*$/.exec(trimmed)
+  if (outerFence) {
     try {
-      return JSON.parse(fenced[1]!.trim())
+      return JSON.parse(outerFence[1]!.trim())
     } catch {
       // fall through
     }
   }
 
-  // 3) Last resort: slice from the first opening bracket to the last closing one, dropping any
-  //    stray prose the model added around the JSON.
-  const start = trimmed.search(/[{[]/)
-  const end = Math.max(trimmed.lastIndexOf("}"), trimmed.lastIndexOf("]"))
-  if (start >= 0 && end > start) {
-    return JSON.parse(trimmed.slice(start, end + 1))
+  // 3) Try fenced blocks in order. This preserves the old behavior for responses that put the
+  //    answer in the first fence and then add extra fenced examples/prose afterward.
+  for (const match of trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)) {
+    try {
+      return JSON.parse(match[1]!.trim())
+    } catch {
+      // try the next fenced block
+    }
+  }
+
+  // 4) Last resort: find complete bracketed JSON values in order, dropping stray prose around them.
+  for (const candidate of jsonValueCandidates(trimmed)) {
+    try {
+      return JSON.parse(candidate)
+    } catch {
+      // try the next complete span
+    }
   }
 
   // Nothing worked — re-parse the trimmed text to surface the original error.
   return JSON.parse(trimmed)
+}
+
+function jsonValueCandidates(text: string): string[] {
+  const candidates: string[] = []
+  for (let start = 0; start < text.length; start++) {
+    const ch = text[start]
+    if (ch !== "{" && ch !== "[") continue
+
+    const stack = [ch === "{" ? "}" : "]"]
+    let inString = false
+    let escaped = false
+    for (let i = start + 1; i < text.length; i++) {
+      const c = text[i]
+      if (inString) {
+        if (escaped) {
+          escaped = false
+        } else if (c === "\\") {
+          escaped = true
+        } else if (c === '"') {
+          inString = false
+        }
+        continue
+      }
+
+      if (c === '"') {
+        inString = true
+      } else if (c === "{" || c === "[") {
+        stack.push(c === "{" ? "}" : "]")
+      } else if (c === "}" || c === "]") {
+        if (stack.at(-1) !== c) break
+        stack.pop()
+        if (stack.length === 0) {
+          candidates.push(text.slice(start, i + 1))
+          break
+        }
+      }
+    }
+  }
+  return candidates
 }

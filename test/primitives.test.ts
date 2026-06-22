@@ -382,6 +382,32 @@ test("M10: corrective-retry usage accumulates across both attempts", async () =>
   }
 })
 
+test("corrective retry handles no structured output once", async () => {
+  let call = 0
+  const b = build({
+    hooks: {
+      run: async () => {
+        call++
+        if (call === 1) {
+          return { text: "not json", structured: undefined, status: "completed", usage: { ...emptyUsage(), outputTokens: 10 } }
+        }
+        return { text: '"ok"', structured: "ok", status: "completed", usage: { ...emptyUsage(), outputTokens: 5 } }
+      },
+    },
+  })
+  try {
+    const out = await runBody(b, `return await agent("p", { schema: { type: "string" } })`)
+    assert.equal(out, "ok")
+    assert.equal(call, 2)
+    const loaded = Journal.load("run_test")
+    const [entry] = [...loaded.results.values()]
+    assert.equal(entry.usage.outputTokens, 15)
+    assert.equal(b.runtime.totalUsage.outputTokens, 15)
+  } finally {
+    b.cleanup()
+  }
+})
+
 test("M4: a retryable AgentError is retried via withRetry, then succeeds", async () => {
   let call = 0
   const b = build({

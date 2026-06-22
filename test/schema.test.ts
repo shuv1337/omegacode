@@ -257,6 +257,13 @@ test("parseJsonLoose strips an outer fence even when the value has inner fences"
   assert.deepEqual(parseJsonLoose("```json\n" + raw + "\n```"), { plan })
 })
 
+test("parseJsonLoose accepts first fenced JSON followed by another fenced block", () => {
+  assert.deepEqual(
+    parseJsonLoose('```json\n{"a":1}\n```\nexplanation:\n```txt\n{"b":2}\n```'),
+    { a: 1 },
+  )
+})
+
 test("parseJsonLoose recovers JSON surrounded by stray prose", () => {
   assert.deepEqual(parseJsonLoose('Sure, here you go: {"a": 1} — done.'), { a: 1 })
 })

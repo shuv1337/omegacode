@@ -395,8 +395,15 @@ export class Runtime {
         try {
           value = this.finalizeResult(spec, result)
         } catch (err) {
-          // One corrective retry on a schema-validation miss (DESIGN §6.3).
-          if (spec.schema && err instanceof WorkflowError && err.message.startsWith("structured output failed schema")) {
+          // One corrective retry on a schema-validation miss (DESIGN §6.3), or when the extraction
+          // turn produced nothing parseable as JSON (a transient miss — give it one more shot
+          // rather than failing the whole agent/run).
+          if (
+            spec.schema &&
+            err instanceof WorkflowError &&
+            (err.message.startsWith("structured output failed schema") ||
+              err.message.includes("returned no structured output"))
+          ) {
             this.o.events.emit({ type: "log", message: `[${label}] structured output retry: ${err.message}` })
             const corrective = {
               ...runSpec,

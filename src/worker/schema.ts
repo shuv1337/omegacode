@@ -188,10 +188,102 @@ function allowsNull(schema: JSONSchema | undefined): boolean {
   return false
 }
 
-/** Best-effort: parse a model's text output as JSON (handles ```json fences). */
+/**
+ * Best-effort: parse a model's text output as JSON.
+ *
+ * Order matters. We try a direct parse FIRST so that a ``` fence appearing *inside* a JSON
+ * string value (e.g. a markdown `plan` field that embeds a ```bash code block) is never
+ * mis-extracted — the previous implementation grabbed the first ```…``` span it saw and corrupted
+ * otherwise-valid JSON. Only if a direct parse fails do we fall back to stripping a whole-output
+ * outer code fence, then fenced blocks in order, and finally complete {…}/[…] spans in order.
+ */
 export function parseJsonLoose(text: string): unknown {
   const trimmed = text.trim()
-  const fence = /```(?:json)?\s*([\s\S]*?)```/.exec(trimmed)
-  const candidate = fence ? fence[1]! : trimmed
-  return JSON.parse(candidate)
+
+  // 1) Clean JSON (the extraction turn is asked for exactly this) — including JSON whose string
+  //    values contain ``` fences.
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    // fall through
+  }
+
+  // 2) The model wrapped the entire JSON in a code fence. Greedy to the last ``` so inner fences
+  //    embedded in string values are preserved, but only useful if the stripped content parses.
+  //    The language tag is matched generically (```json, ```python, ```js, …) so a non-`json`
+  //    tag is still stripped here rather than relying on the stage-4 brace scanner to salvage it.
+  const outerFence = /^\s*```[A-Za-z0-9_+-]*\s*([\s\S]*)```\s*$/.exec(trimmed)
+  if (outerFence) {
+    try {
+      return JSON.parse(outerFence[1]!.trim())
+    } catch {
+      // fall through
+    }
+  }
+
+  // 3) Try fenced blocks in order, taking the FIRST that parses. Non-greedy (`*?`) on purpose:
+  //    it stops at the nearest closing ```, so a response that puts the answer in the first fence
+  //    and then adds extra fenced examples/prose afterward resolves to the answer, not a span that
+  //    swallows the later fences. (Language tag matched generically, as in stage 2.)
+  for (const match of trimmed.matchAll(/```[A-Za-z0-9_+-]*\s*([\s\S]*?)```/g)) {
+    try {
+      return JSON.parse(match[1]!.trim())
+    } catch {
+      // try the next fenced block
+    }
+  }
+
+  // 4) Last resort: find complete bracketed JSON values in order, dropping stray prose around them.
+  //    Tradeoff: if the leftmost span is malformed (e.g. an object with an unquoted key) this may
+  //    return a nested inner span instead — acceptable here because it only runs after stages 1-3
+  //    fail, and the caller's schema validation rejects a wrong-shaped salvage.
+  for (const candidate of jsonValueCandidates(trimmed)) {
+    try {
+      return JSON.parse(candidate)
+    } catch {
+      // try the next complete span
+    }
+  }
+
+  // Nothing worked — re-parse the trimmed text to surface the original error.
+  return JSON.parse(trimmed)
+}
+
+// Lazy on purpose: yields one balanced span at a time so the caller can stop at the first that
+// parses, avoiding an O(n²) full scan of bracket-heavy input.
+function* jsonValueCandidates(text: string): Generator<string> {
+  for (let start = 0; start < text.length; start++) {
+    const ch = text[start]
+    if (ch !== "{" && ch !== "[") continue
+
+    const stack = [ch === "{" ? "}" : "]"]
+    let inString = false
+    let escaped = false
+    for (let i = start + 1; i < text.length; i++) {
+      const c = text[i]
+      if (inString) {
+        if (escaped) {
+          escaped = false
+        } else if (c === "\\") {
+          escaped = true
+        } else if (c === '"') {
+          inString = false
+        }
+        continue
+      }
+
+      if (c === '"') {
+        inString = true
+      } else if (c === "{" || c === "[") {
+        stack.push(c === "{" ? "}" : "]")
+      } else if (c === "}" || c === "]") {
+        if (stack.at(-1) !== c) break
+        stack.pop()
+        if (stack.length === 0) {
+          yield text.slice(start, i + 1)
+          break
+        }
+      }
+    }
+  }
 }

@@ -210,7 +210,9 @@ export function parseJsonLoose(text: string): unknown {
 
   // 2) The model wrapped the entire JSON in a code fence. Greedy to the last ``` so inner fences
   //    embedded in string values are preserved, but only useful if the stripped content parses.
-  const outerFence = /^\s*```(?:json)?\s*([\s\S]*)```\s*$/.exec(trimmed)
+  //    The language tag is matched generically (```json, ```python, ```js, …) so a non-`json`
+  //    tag is still stripped here rather than relying on the stage-4 brace scanner to salvage it.
+  const outerFence = /^\s*```[A-Za-z0-9_+-]*\s*([\s\S]*)```\s*$/.exec(trimmed)
   if (outerFence) {
     try {
       return JSON.parse(outerFence[1]!.trim())
@@ -219,9 +221,11 @@ export function parseJsonLoose(text: string): unknown {
     }
   }
 
-  // 3) Try fenced blocks in order. This preserves the old behavior for responses that put the
-  //    answer in the first fence and then add extra fenced examples/prose afterward.
-  for (const match of trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)) {
+  // 3) Try fenced blocks in order, taking the FIRST that parses. Non-greedy (`*?`) on purpose:
+  //    it stops at the nearest closing ```, so a response that puts the answer in the first fence
+  //    and then adds extra fenced examples/prose afterward resolves to the answer, not a span that
+  //    swallows the later fences. (Language tag matched generically, as in stage 2.)
+  for (const match of trimmed.matchAll(/```[A-Za-z0-9_+-]*\s*([\s\S]*?)```/g)) {
     try {
       return JSON.parse(match[1]!.trim())
     } catch {
@@ -230,6 +234,9 @@ export function parseJsonLoose(text: string): unknown {
   }
 
   // 4) Last resort: find complete bracketed JSON values in order, dropping stray prose around them.
+  //    Tradeoff: if the leftmost span is malformed (e.g. an object with an unquoted key) this may
+  //    return a nested inner span instead — acceptable here because it only runs after stages 1-3
+  //    fail, and the caller's schema validation rejects a wrong-shaped salvage.
   for (const candidate of jsonValueCandidates(trimmed)) {
     try {
       return JSON.parse(candidate)
@@ -242,8 +249,9 @@ export function parseJsonLoose(text: string): unknown {
   return JSON.parse(trimmed)
 }
 
-function jsonValueCandidates(text: string): string[] {
-  const candidates: string[] = []
+// Lazy on purpose: yields one balanced span at a time so the caller can stop at the first that
+// parses, avoiding an O(n²) full scan of bracket-heavy input.
+function* jsonValueCandidates(text: string): Generator<string> {
   for (let start = 0; start < text.length; start++) {
     const ch = text[start]
     if (ch !== "{" && ch !== "[") continue
@@ -272,11 +280,10 @@ function jsonValueCandidates(text: string): string[] {
         if (stack.at(-1) !== c) break
         stack.pop()
         if (stack.length === 0) {
-          candidates.push(text.slice(start, i + 1))
+          yield text.slice(start, i + 1)
           break
         }
       }
     }
   }
-  return candidates
 }

@@ -188,10 +188,45 @@ function allowsNull(schema: JSONSchema | undefined): boolean {
   return false
 }
 
-/** Best-effort: parse a model's text output as JSON (handles ```json fences). */
+/**
+ * Best-effort: parse a model's text output as JSON.
+ *
+ * Order matters. We try a direct parse FIRST so that a ``` fence appearing *inside* a JSON
+ * string value (e.g. a markdown `plan` field that embeds a ```bash code block) is never
+ * mis-extracted — the previous implementation grabbed the first ```…``` span it saw and corrupted
+ * otherwise-valid JSON. Only if a direct parse fails do we fall back to stripping an outer code
+ * fence (greedy, so an inner ``` is preserved) and finally to slicing the outermost {…}/[…] span.
+ */
 export function parseJsonLoose(text: string): unknown {
   const trimmed = text.trim()
-  const fence = /```(?:json)?\s*([\s\S]*?)```/.exec(trimmed)
-  const candidate = fence ? fence[1]! : trimmed
-  return JSON.parse(candidate)
+
+  // 1) Clean JSON (the extraction turn is asked for exactly this) — including JSON whose string
+  //    values contain ``` fences.
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    // fall through
+  }
+
+  // 2) The model wrapped the JSON in a code fence. Strip the OUTERMOST fence (greedy to the last
+  //    ```), which keeps any ``` embedded in the JSON intact.
+  const fenced = /```(?:json)?\s*([\s\S]*)```/.exec(trimmed)
+  if (fenced) {
+    try {
+      return JSON.parse(fenced[1]!.trim())
+    } catch {
+      // fall through
+    }
+  }
+
+  // 3) Last resort: slice from the first opening bracket to the last closing one, dropping any
+  //    stray prose the model added around the JSON.
+  const start = trimmed.search(/[{[]/)
+  const end = Math.max(trimmed.lastIndexOf("}"), trimmed.lastIndexOf("]"))
+  if (start >= 0 && end > start) {
+    return JSON.parse(trimmed.slice(start, end + 1))
+  }
+
+  // Nothing worked — re-parse the trimmed text to surface the original error.
+  return JSON.parse(trimmed)
 }

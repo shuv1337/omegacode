@@ -240,3 +240,23 @@ test("parseJsonLoose handles bare JSON and fenced JSON", () => {
 test("parseJsonLoose throws on non-JSON", () => {
   assert.throws(() => parseJsonLoose("not json at all"))
 })
+
+// Regression: a ``` code fence appearing *inside* a JSON string value (e.g. a markdown `plan`
+// field that embeds a ```bash block) must not be mis-stripped. The old fence-first logic grabbed
+// the first ```…``` span and corrupted otherwise-valid JSON, surfacing as "no structured output".
+test("parseJsonLoose preserves ``` fences inside string values", () => {
+  const plan = "Step 1.\n```bash\nmake test\n```\nDone."
+  const raw = JSON.stringify({ plan, keyDecisions: ["a"], risks: ["b"] })
+  assert.deepEqual(parseJsonLoose(raw), { plan, keyDecisions: ["a"], risks: ["b"] })
+})
+
+test("parseJsonLoose strips an outer fence even when the value has inner fences", () => {
+  const plan = "Use:\n```python\nx = 1\n```"
+  const raw = JSON.stringify({ plan })
+  // model wrapped the whole JSON in a ```json fence; the value still contains ``` blocks
+  assert.deepEqual(parseJsonLoose("```json\n" + raw + "\n```"), { plan })
+})
+
+test("parseJsonLoose recovers JSON surrounded by stray prose", () => {
+  assert.deepEqual(parseJsonLoose('Sure, here you go: {"a": 1} — done.'), { a: 1 })
+})

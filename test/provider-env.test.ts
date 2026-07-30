@@ -31,7 +31,7 @@ function writeFakeBin(path: string, version: string, eventJson: string): void {
       'process.stdin.setEncoding("utf8");',
       'process.stdin.on("data", (c) => (stdin += c));',
       'process.stdin.on("end", () => {',
-      "  fs.writeFileSync(process.env.RECORD, JSON.stringify({ argv: args, stdin, cwd: process.cwd(), env: { OPENCODE_DISABLE_AUTOUPDATE: process.env.OPENCODE_DISABLE_AUTOUPDATE, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR } }));",
+      "  fs.writeFileSync(process.env.RECORD, JSON.stringify({ argv: args, stdin, cwd: process.cwd(), env: { OPENCODE_DISABLE_AUTOUPDATE: process.env.OPENCODE_DISABLE_AUTOUPDATE, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, SHUVPI_CODING_AGENT_DIR: process.env.SHUVPI_CODING_AGENT_DIR } }));",
       "  console.log('" + eventJson + "');",
       "});",
     ].join("\n"),
@@ -87,6 +87,7 @@ test("pi: overrides.piBin drives a real spawn with the exact argv/stdin contract
     assert.equal(realpathSync(launch.cwd), realpathSync(dir))
     // The RUN inherits the user's agent dir (auth lives there) — no scratch isolation here.
     assert.equal(launch.env.PI_CODING_AGENT_DIR, undefined)
+    assert.equal(launch.env.SHUVPI_CODING_AGENT_DIR, undefined)
   } finally {
     restoreEnv("OMEGACODE_HOME", prev.OMEGACODE_HOME)
     restoreEnv("RECORD", prev.RECORD)

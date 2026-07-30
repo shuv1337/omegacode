@@ -572,14 +572,17 @@ async function cmdDoctor(): Promise<void> {
   // NOT FOUND for a binary the factory would happily spawn.
   const codexBin = process.env.CODEX_BIN ?? "codex"
   const opencodeBin = process.env.OPENCODE_BIN ?? "opencode"
-  const piBin = process.env.PI_BIN ?? "pi"
+  const piBin = process.env.PI_BIN ?? "shuvpi"
 
-  // pi probes run isolated (scratch agent dir, neutral cwd): old binaries wrote lock files and a
-  // repo-local .pi even on --version, and 0.79.1 is not confirmed clean.
+  // pi/shuvpi probes run isolated (scratch agent dir, neutral cwd): old binaries wrote lock files
+  // and a repo-local .pi even on --version. Both agent-dir env vars cover upstream pi and shuvpi.
   const piScratch = mkdtempSync(join(tmpdir(), "omegacode-doctor-pi-"))
   let piOut: string
   try {
-    piOut = check(piBin, ["--version"], { env: { ...process.env, PI_CODING_AGENT_DIR: piScratch }, cwd: tmpdir() })
+    piOut = check(piBin, ["--version"], {
+      env: { ...process.env, PI_CODING_AGENT_DIR: piScratch, SHUVPI_CODING_AGENT_DIR: piScratch },
+      cwd: tmpdir(),
+    })
   } finally {
     rmSync(piScratch, { recursive: true, force: true })
   }
@@ -589,7 +592,7 @@ async function cmdDoctor(): Promise<void> {
   console.log(`  codex        : ${check(codexBin, ["--version"])}`)
   console.log(`  claude-code  : ${check("claude", ["--version"])}`)
   console.log(`  opencode     : ${withMin(check(opencodeBin, ["--version"]), OPENCODE_MIN_VERSION, "upgrade the opencode CLI")}`)
-  console.log(`  pi           : ${withMin(piOut, PI_MIN_VERSION, "npm i -g @earendil-works/pi-coding-agent")}`)
+  console.log(`  pi           : ${withMin(piOut, PI_MIN_VERSION, "install/upgrade shuvpi (or set PI_BIN)")}`)
   console.log(`  data dir     : ${dataRoot()}`)
 }
 

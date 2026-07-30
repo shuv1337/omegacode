@@ -97,6 +97,12 @@ test("opencodeBin / piBin are consumed by their workers", () => {
   assert.equal((pi as unknown as { bin: string }).bin, "/opt/pi")
 })
 
+test("pi worker defaults to shuvpi when piBin is unset", () => {
+  const f = new DefaultWorkerFactory()
+  const pi = f.get("pi")
+  assert.equal((pi as unknown as { bin: string }).bin, "shuvpi")
+})
+
 test("shutdownAll clears the cache and is safe to call repeatedly", async () => {
   const f = new DefaultWorkerFactory({ fake: true })
   const first = f.get("codex")

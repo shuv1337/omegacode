@@ -21,9 +21,9 @@ omegacode install-skill
 `--claude` or `--agents` to install to just one.
 
 You'll need Node 20+ and at least one worker installed: `codex` (the default provider), `claude`,
-`opencode` (≥ 1.16.2), and/or `pi` (≥ 0.79.1, `npm i -g @earendil-works/pi-coding-agent`). Run
-`omegacode doctor` to check — it flags binaries below the minimum versions, which the workers
-refuse at runtime.
+`opencode` (≥ 1.16.2), and/or `shuvpi` / `pi` (≥ 0.79.1). The `pi` provider defaults to the
+`shuvpi` binary (`PI_BIN` overrides). Run `omegacode doctor` to check — it flags binaries below
+the minimum versions, which the workers refuse at runtime.
 
 > **Note on opencode/pi sandboxing:** neither CLI can enforce a confined sandbox, so omegacode
 > accepts them **only** with an explicit `sandbox: "danger-full-access"` (per call or via

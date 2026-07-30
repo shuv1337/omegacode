@@ -11,7 +11,8 @@
 // JSON print mode does NOT reflect stream failures in the exit code: terminal classification is
 // driven by in-stream assistant stopReason ("error"/"aborted"), never the exit code alone.
 //
-// Verified against @earendil-works/pi-coding-agent 0.79.1 (earendil-works/pi @ 9ccfcd7); older
+// Default binary is the local shuvpi fork (`shuvpi`); override with PI_BIN / FactoryOpts.piBin.
+// Verified against pi ≥ 0.79.1 JSONL surface (shuvpi 0.83.0 is a compatible fork). Older
 // binaries (including any from the renamed @mariozechner package, which caps at 0.73.1) are refused.
 
 import { mkdtempSync, rmSync } from "node:fs"
@@ -68,7 +69,7 @@ export class PiWorker implements Worker {
   private versionCheck: Promise<void> | null = null
 
   constructor(opts: PiWorkerOpts = {}) {
-    this.bin = opts.bin ?? "pi"
+    this.bin = opts.bin ?? "shuvpi"
     this.spawnProcess = opts.spawnProcess
     this.stallTimeoutMs = opts.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS
   }
@@ -174,6 +175,7 @@ export class PiWorker implements Worker {
   private async checkVersion(): Promise<void> {
     // Isolate the probe: old pi binaries wrote files (agent-dir lock, repo-local .pi) even on
     // --version, so it runs with a scratch agent dir and a neutral cwd regardless of version.
+    // Set both env vars: upstream pi reads PI_CODING_AGENT_DIR; shuvpi reads SHUVPI_CODING_AGENT_DIR.
     const scratch = mkdtempSync(join(tmpdir(), "omegacode-pi-version-"))
     let out: string
     try {
@@ -182,7 +184,11 @@ export class PiWorker implements Worker {
         bin: this.bin,
         args: ["--version"],
         cwd: tmpdir(),
-        env: { ...process.env, PI_CODING_AGENT_DIR: scratch },
+        env: {
+          ...process.env,
+          PI_CODING_AGENT_DIR: scratch,
+          SHUVPI_CODING_AGENT_DIR: scratch,
+        },
         spawnProcess: this.spawnProcess,
       })
     } finally {
@@ -194,7 +200,7 @@ export class PiWorker implements Worker {
         code: "provider_outdated",
         message:
           `pi ${out || "(unknown version)"} is below the minimum supported ${PI_MIN_VERSION} — ` +
-          `upgrade with: npm i -g @earendil-works/pi-coding-agent (the renamed @mariozechner/pi-coding-agent package is outdated)`,
+          `use shuvpi ≥ ${PI_MIN_VERSION} (or set PI_BIN to a compatible pi/shuvpi binary)`,
         retryable: false,
       })
     }
@@ -236,10 +242,10 @@ export class PiWorker implements Worker {
       bin: this.bin,
       args,
       cwd: spec.cwd,
-      // Runs deliberately inherit the user's env UN-isolated: pi's auth lives inside the agent
-      // dir (~/.pi/agent/auth.json), so a scratch PI_CODING_AGENT_DIR would break every run.
-      // --no-session keeps run state out of the user's session history; only the --version
-      // probe (which needs no auth) gets the scratch-dir treatment.
+      // Runs deliberately inherit the user's env UN-isolated: auth lives in the agent dir
+      // (~/.shuvpi/agent/auth.json for shuvpi, ~/.pi/agent/auth.json for upstream), so a scratch
+      // agent-dir override would break every run. --no-session keeps run state out of the user's
+      // session history; only the --version probe (which needs no auth) gets the scratch-dir treatment.
       env: process.env,
       stdin: prompt,
       signal: ctx.signal,

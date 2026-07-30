@@ -307,13 +307,15 @@ test("version preflight: isolated probe env, once per worker, outdated refused w
   await assert.rejects(h.worker.runAgent(spec(), ctx()), (err: unknown) => {
     assert.ok(err instanceof AgentError)
     assert.equal(err.code, "provider_outdated")
-    assert.match(err.message, /@earendil-works\/pi-coding-agent/)
+    assert.match(err.message, /shuvpi/)
     assert.match(err.message, new RegExp(PI_MIN_VERSION.replace(/\./g, "\\.")))
     return true
   })
   // The probe runs with a scratch agent dir and a neutral cwd — never the user's project.
+  // Both env vars isolate upstream pi and the shuvpi fork.
   const probe = h.spawned[0]!
   assert.ok(probe.env?.PI_CODING_AGENT_DIR?.includes("omegacode-pi-version-"))
+  assert.ok(probe.env?.SHUVPI_CODING_AGENT_DIR?.includes("omegacode-pi-version-"))
   assert.equal(probe.cwd, tmpdir())
 
   const h2 = harness([versionOk, happyRun, happyRun])
